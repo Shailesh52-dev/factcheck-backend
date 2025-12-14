@@ -75,7 +75,7 @@ def analyze_content(text: str, source_type: str = "text"):
     text_lower = text.lower()
     factors = [] 
     
-    # 1. Fake Indicators (Expanded)
+    # 1. Fake Indicators (Expanded with Health Scams)
     fake_triggers = {
         "shocking": "Uses emotionally charged language ('shocking').",
         "secret": "Claims to reveal 'secret' information.",
@@ -90,10 +90,15 @@ def analyze_content(text: str, source_type: str = "text"):
         "leaked": "Uses 'leaked' to imply forbidden knowledge.",
         "viral": "Focuses on virality rather than facts.",
         "you won't believe": "Clickbait phrasing detected.",
-        "end of the world": "Fear-mongering detected."
+        "end of the world": "Fear-mongering detected.",
+        "cure": "Promises a 'cure' (medical news usually says 'treatment' or 'results').",
+        "permanently": "Makes absolute promises about permanence.",
+        "within days": "Promises unrealistic timelines.",
+        "simple trick": "Uses clickbait 'trick' language.",
+        "doctors hate": "Appeals to anti-medical conspiracy."
     }
     
-    # 2. Real Indicators (Significantly Expanded)
+    # 2. Real Indicators
     real_triggers = {
         "official": "Cites 'official' sources.",
         "report": "References a 'report' or structured document.",
