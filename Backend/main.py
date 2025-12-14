@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import urllib.parse
+from textblob import TextBlob # Import for Sentiment Analysis
 
 # Initialize App
 app = FastAPI(title="FactCheck AI Backend")
@@ -75,7 +76,29 @@ def analyze_content(text: str, source_type: str = "text"):
     text_lower = text.lower()
     factors = [] 
     
-    # 1. Fake Indicators (Expanded with Health Scams)
+    # --- 0. Sentiment Analysis (New Feature) ---
+    blob = TextBlob(text)
+    sentiment = blob.sentiment
+    subjectivity = sentiment.subjectivity # 0.0 (Objective) to 1.0 (Subjective)
+    polarity = sentiment.polarity         # -1.0 (Negative) to 1.0 (Positive)
+
+    fake_score = 0
+    real_score = 0
+
+    # Subjectivity Check: Real news is usually objective (low subjectivity)
+    if subjectivity > 0.5:
+        fake_score += 2.0
+        factors.append(f"🚩 High subjectivity detected ({round(subjectivity*100)}%). Content appears opinionated rather than factual.")
+    else:
+        real_score += 1.0
+        factors.append("✅ Tone is objective and neutral (Low subjectivity).")
+
+    # Polarity Check: Real news is rarely extremely emotional
+    if abs(polarity) > 0.8:
+        fake_score += 1.5
+        factors.append("🚩 Extremely emotional language detected.")
+
+    # 1. Fake Indicators (Expanded with Health Scams & Conspiracies)
     fake_triggers = {
         "shocking": "Uses emotionally charged language ('shocking').",
         "secret": "Claims to reveal 'secret' information.",
@@ -95,10 +118,16 @@ def analyze_content(text: str, source_type: str = "text"):
         "permanently": "Makes absolute promises about permanence.",
         "within days": "Promises unrealistic timelines.",
         "simple trick": "Uses clickbait 'trick' language.",
-        "doctors hate": "Appeals to anti-medical conspiracy."
+        "doctors hate": "Appeals to anti-medical conspiracy.",
+        "big pharma": "Uses conspiracy theorist terminology.",
+        "mainstream media": "Attempts to discredit standard journalism.",
+        "wake up": "Uses cult-like awakening language.",
+        "truth about": "Implies a hidden truth vs public lie.",
+        "government plot": "Directly alleges conspiracy without evidence.",
+        "hidden agenda": "Implies malicious intent without proof."
     }
     
-    # 2. Real Indicators
+    # 2. Real Indicators (Significantly Expanded)
     real_triggers = {
         "official": "Cites 'official' sources.",
         "report": "References a 'report' or structured document.",
@@ -118,23 +147,38 @@ def analyze_content(text: str, source_type: str = "text"):
         "minister": "References a government official.",
         "department": "References an official department.",
         "university": "Cites an academic institution.",
-        "research": "References scientific research."
+        "research": "References scientific research.",
+        "published in": "Cites a publication venue.",
+        "journal": "References academic or professional journals.",
+        "spokesperson": "Attributes quote to an official representative.",
+        "evidence suggests": "Uses cautious, scientific language."
     }
 
-    fake_score = 0
-    real_score = 0
+    # 3. Trusted Source Mentions (New Category)
+    trusted_sources = [
+        "who", "cdc", "nasa", "fda", "un", "nato", "reuters", "ap", "afp", "bbc", 
+        "cnn", "nytimes", "washington post", "guardian", "isro", "rbi", "sebi", "iit", "aiims"
+    ]
     
+    # Check Fake Triggers
     for word, reason in fake_triggers.items():
         if word in text_lower:
             fake_score += 1.5 
             factors.append(f"🚩 {reason}")
             
+    # Check Real Triggers
     for word, reason in real_triggers.items():
         if word in text_lower:
             real_score += 1
             factors.append(f"✅ {reason}")
 
-    # 3. Structural Checks
+    # Check Trusted Sources (Boost Real Score)
+    for source in trusted_sources:
+        if f" {source} " in f" {text_lower} " or f"{source}." in text_lower: # basic word boundary check
+            real_score += 2.0
+            factors.append(f"✅ Cites reputable entity ('{source.upper()}').")
+
+    # 4. Structural Checks
     if len(text) > 20 and sum(1 for c in text if c.isupper()) / len(text) > 0.6:
         fake_score += 2
         factors.append("🚩 Excessive use of capitalization detected.")
@@ -143,19 +187,33 @@ def analyze_content(text: str, source_type: str = "text"):
         fake_score += 1
         factors.append("🚩 Excessive exclamation marks detected.")
 
-    # 4. Calculate Confidence (Weighted Logic)
-    # If no triggers found, slightly favor Real if length is decent (news headlines are usually neutral)
+    # 5. Contextual Logic (The "Robustness" Layer)
+    # If text makes medical claims ("cure", "doctor", "health") but lacks scientific backing triggers ("study", "journal"), penalize it.
+    medical_keywords = ["cure", "medicine", "health", "doctor", "treatment", "virus", "disease", "diabetes", "cancer"]
+    has_medical_context = any(word in text_lower for word in medical_keywords)
+    has_scientific_backing = any(word in text_lower for word in ["study", "research", "journal", "clinical", "trial", "published", "report"])
+    
+    if has_medical_context and not has_scientific_backing:
+        fake_score += 2.0
+        factors.append("🚩 Makes medical claims without citing studies, trials, or reports.")
+
+    # 6. Calculate Confidence (Weighted Logic)
+    # If no triggers found, heavily rely on sentiment and structure
     if fake_score == 0 and real_score == 0:
-        if len(text.split()) > 6:
-             # Neutral, grammatical sentences are usually real
-             conf_fake = 0.35 
-             conf_real = 0.65
-             factors.append("✅ No sensationalist keywords found; likely neutral reporting.")
+        if subjectivity < 0.4 and len(text.split()) > 6:
+             # Neutral, grammatical sentences are likely real
+             conf_fake = 0.3 
+             conf_real = 0.7
+             factors.append("✅ No sensationalism found and tone is objective.")
+        elif subjectivity > 0.6:
+             conf_fake = 0.65
+             conf_real = 0.35
+             factors.append("ℹ️ High subjectivity suggests opinion, but no specific fake keywords found.")
         else:
-             # Too short to tell
+             # Too ambiguous
              conf_fake = 0.5
              conf_real = 0.5
-             factors.append("ℹ️ Text is too short for definitive analysis.")
+             factors.append("ℹ️ Text is neutral but lacks verifiable citations.")
     else:
         total = fake_score + real_score + 0.1
         conf_fake = fake_score / total
@@ -180,10 +238,10 @@ def analyze_content(text: str, source_type: str = "text"):
             factors.append("✅ Tone appears neutral and objective.")
             factors.append("✅ Structure resembles journalistic reporting.")
 
-    # 5. Fetch Live News (The New Combination Feature)
+    # 7. Fetch Live News (The New Combination Feature)
     related_news = search_google_news(text)
 
-    # 6. Static Resources
+    # 8. Static Resources
     verification_tools = []
     if classification == "Real":
         verification_tools = [
