@@ -414,6 +414,31 @@ async def predict_url(request: UrlRequest):
 
 @app.post("/predict_image")
 async def predict_image(file: UploadFile = File(...)):
+    # 1. Try Real OCR via external API (OCR.space)
+    try:
+        contents = await file.read()
+        
+        # Use env var for key if available, else fallback to 'helloworld'
+        ocr_key = os.getenv("OCR_API_KEY", "helloworld")
+        
+        response = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'file': (file.filename, contents, file.content_type)},
+            data={'apikey': ocr_key, 'language': 'eng'},
+            timeout=5
+        )
+        result = response.json()
+        
+        if not result.get('IsErroredOnProcessing') and result.get('ParsedResults'):
+            extracted_text = result['ParsedResults'][0]['ParsedText']
+            if len(extracted_text.strip()) > 10:
+                analysis = analyze_content(extracted_text, "image")
+                analysis['explanation'] = f"(Analyzed Image Text): {analysis['explanation']}"
+                return analysis
+    except Exception as e:
+        print(f"OCR Error: {str(e)}")
+        
+    # 2. Fallback
     mock_text = "Breaking news: The shocking truth about the secret update they don't want you to know!"
     return analyze_content(mock_text, "image")
 

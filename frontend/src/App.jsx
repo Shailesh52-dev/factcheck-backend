@@ -88,7 +88,18 @@ export default function App() {
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+      const file = e.target.files[0];
+      
+      // Client-side size validation (1MB = 1048576 bytes)
+      if (file.size > 1024 * 1024) {
+        setError("File size exceeds 1MB limit. Please upload a smaller image (or crop it).");
+        setSelectedFile(null);
+        e.target.value = null; // Reset the input
+        return;
+      }
+      
+      setSelectedFile(file);
+      setError(null);
     }
   };
 
@@ -146,11 +157,21 @@ export default function App() {
         method: 'POST',
         body: formData,
       });
-      if (!response.ok) throw new Error('Failed to process image');
+      
+      if (response.status === 413) {
+        throw new Error('File is too large for the server (Max 1MB).');
+      }
+      
+      if (!response.ok) {
+         // Try to get error message from backend
+         const errData = await response.json().catch(() => ({}));
+         throw new Error(errData.detail || 'Failed to process image');
+      }
+      
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError("Error processing image. Ensure Tesseract is installed on the server.");
+      setError(err.message || "Error processing image. Ensure Tesseract is installed on the server.");
     } finally {
       setLoading(false);
     }
@@ -163,7 +184,7 @@ export default function App() {
     if (activeTab === 'image') analyzeImage();
   };
 
-  // Helper to determine styles based on classification (Includes UNVERIFIED)
+  // Helper to determine styles based on classification
   const getResultStyles = (classification) => {
     if (classification === 'Fake') {
         return {
@@ -181,7 +202,7 @@ export default function App() {
             icon: <ShieldCheck className="w-6 h-6" />,
             label: "Credible Source"
         };
-    } else { // Unverified (Amber/Yellow)
+    } else { // Unverified
         return {
             container: 'bg-amber-50 border-amber-100 text-amber-700',
             shadow: 'shadow-amber-500/10',
@@ -417,6 +438,11 @@ export default function App() {
                                     </div>
                                     <div className="text-sm text-gray-600 font-medium">
                                     {selectedFile ? selectedFile.name : "Upload a screenshot of the article"}
+                                    </div>
+                                    {/* Added Warning Here */}
+                                    <div className="text-xs text-amber-500 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-100 flex items-center gap-1">
+                                        <AlertCircle className="w-3 h-3" />
+                                        Max file size: 1MB
                                     </div>
                                 </div>
                                 </div>
