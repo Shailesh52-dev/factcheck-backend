@@ -1,0 +1,13 @@
+# --- Dependencies and Build Artifacts ---
+/node_modules
+/frontend/node_modules
+/backend/node_modules
+
+# Logs and Environment Files
+*.log
+.env
+.env.local
+
+# Compiled Python files
+__pycache__/
+*.pyc

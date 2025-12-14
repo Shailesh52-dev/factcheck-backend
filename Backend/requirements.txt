@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+torch
+transformers
+newspaper3k
+pytesseract
+python-multipart
+pillow
+requests
+beautifulsoup4
