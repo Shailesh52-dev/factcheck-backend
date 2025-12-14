@@ -172,10 +172,11 @@ def analyze_content(text: str, source_type: str = "text"):
         strong_evidence = [
             "clinical trial", "peer-reviewed", "meta-analysis", "systematic review", 
             "published in", "official report", "court documents", "police report", 
-            "data shows", "scientific study", "evidence suggests", "statement by"
+            "data shows", "scientific study", "evidence suggests", "statement by",
+            "according to", "reported by", "confirmed by"
         ]
         medium_evidence = [
-            "study", "research", "survey", "according to", "statement", "announced", 
+            "study", "research", "survey", "statement", "announced", 
             "journal", "report", "investigation", "authorities", "witnesses", "incident"
         ]
         
@@ -202,7 +203,8 @@ def analyze_content(text: str, source_type: str = "text"):
         trusted_orgs = [
             "who", "cdc", "nasa", "fda", "un", "nato", "reuters", "ap", "afp", "bbc", 
             "cnn", "isro", "rbi", "sebi", "iit", "aiims", "government", "ministry", 
-            "department", "university", "police", "fbi", "cia", "authorities"
+            "department", "university", "police", "fbi", "cia", "authorities",
+            "times of india", "hindu", "indian express", "ndtv", "pib"
         ]
         
         vague_sources = [
@@ -212,12 +214,12 @@ def analyze_content(text: str, source_type: str = "text"):
             "growing body of evidence", "up to us to decide"
         ]
         
-        citation_context_words = ["said", "reported", "announced", "warned", "stated", "published", "released", "confirmed"]
+        citation_context_words = ["said", "reported", "announced", "warned", "stated", "published", "released", "confirmed", "according to"]
         
         has_trusted = False
         for org in trusted_orgs:
             if org in text_lower:
-                if any(ctx in text_lower for ctx in citation_context_words):
+                if any(ctx in text_lower for ctx in citation_context_words) or source_type == "url":
                     source_score += 70
                     has_trusted = True
                     factors.append(f"✅ Source Specificity: Cites specific entity '{org.upper()}' with attribution.")
@@ -353,7 +355,11 @@ def analyze_content(text: str, source_type: str = "text"):
                     (source_score * 0.20) + \
                     (claim_score * 0.20) - \
                     risk_penalty
-                    
+        
+        # Boost score slightly for URLs to account for potential scraping loss
+        if source_type == "url":
+            final_score += 5
+                  
         if evidence_score < 10 and final_score > 65:
             final_score = 65.0
         
@@ -362,12 +368,12 @@ def analyze_content(text: str, source_type: str = "text"):
             
         final_score = max(0, min(100, final_score))
         
-        # --- Classification Logic ---
-        if final_score >= 75:
+        # --- Classification Logic (Widened "Unverified" Zone) ---
+        if final_score >= 70: # Lowered threshold from 75 to 70 for Real
             classification = "Real"
             conf_real = final_score / 100.0
             conf_fake = 1 - conf_real
-        elif final_score <= 40:
+        elif final_score <= 45: # Raised threshold from 40 to 45 for Fake
             classification = "Fake"
             conf_fake = (100 - final_score) / 100.0
             conf_real = 1 - conf_fake
@@ -475,10 +481,18 @@ async def predict_url(request: UrlRequest):
         meaningful_paragraphs = [p for p in all_paragraphs if len(p) > 50]
         content_paragraphs = meaningful_paragraphs[:7] if meaningful_paragraphs else all_paragraphs[:5]
         
+        # Enhanced Metadata Extraction
         meta_desc = ""
-        meta_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
-        if meta_tag and meta_tag.get("content"):
-            meta_desc = meta_tag["content"]
+        meta_tag_desc = soup.find("meta", attrs={"name": "description"})
+        meta_tag_og = soup.find("meta", attrs={"property": "og:description"})
+        meta_tag_twitter = soup.find("meta", attrs={"name": "twitter:description"})
+        
+        if meta_tag_desc and meta_tag_desc.get("content"):
+            meta_desc += meta_tag_desc["content"] + " "
+        if meta_tag_og and meta_tag_og.get("content"):
+            meta_desc += meta_tag_og["content"] + " "
+        if meta_tag_twitter and meta_tag_twitter.get("content"):
+             meta_desc += meta_tag_twitter["content"]
 
         full_text = title + ". " + meta_desc + ". " + " ".join(content_paragraphs)
         

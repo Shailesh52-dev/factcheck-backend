@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 
 // !!! FINAL DEPLOYMENT FIX: HARDCODE LIVE URL (Safest Method for Immediate Functionality) !!!
-// Using the direct Render URL avoids 'process is not defined' errors in client-side code.
 const API_BASE_URL = "https://factcheck-backend-xiyn.onrender.com";
 
 export default function App() {
@@ -109,8 +108,8 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      // Use API_BASE_URL + /analyze path for robust connection
-      const response = await fetch(`${API_BASE_URL}/analyze`, { 
+      const apiUrl = `${API_BASE_URL}/analyze`;
+      const response = await fetch(apiUrl, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText }),
@@ -164,7 +163,6 @@ export default function App() {
       }
       
       if (!response.ok) {
-         // Try to get error message from backend
          const errData = await response.json().catch(() => ({}));
          throw new Error(errData.detail || 'Failed to process image');
       }
@@ -213,6 +211,19 @@ export default function App() {
         };
     }
   };
+
+  // Determine the score to display (prefer the new credibility_score)
+  const getDisplayScore = (res) => {
+      if (res.credibility_score !== undefined) {
+          return res.credibility_score;
+      }
+      // Fallback for older backend versions
+      if (res.classification === 'Real') return Math.round(res.confidenceReal * 100);
+      if (res.classification === 'Fake') return Math.round((1 - res.confidenceFake) * 100); // Inverse for fake
+      return 50; 
+  };
+
+  const displayScore = result ? getDisplayScore(result) : 0;
 
   if (!isStyleReady) {
     return (
@@ -497,15 +508,17 @@ export default function App() {
                                      </span>
                                  </div>
                                  
+                                 {/* UPDATED SCORE DISPLAY: Uses displayScore instead of raw confidence math */}
                                  <div className="text-gray-500 font-medium">
-                                    Confidence Score: <span className="text-gray-900 font-bold">{(Math.max(result.confidenceReal, result.confidenceFake) * 100).toFixed(1)}%</span>
+                                    Credibility Score: <span className="text-gray-900 font-bold">{displayScore}/100</span>
                                  </div>
                             </div>
 
+                            {/* UPDATED PROGRESS BAR: Uses displayScore for width */}
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-10 max-w-md mx-auto relative shadow-inner">
                                <div 
                                  className={`h-full rounded-full transition-all duration-1000 ${resultStyle.bar}`}
-                                 style={{ width: `${Math.max(result.confidenceReal, result.confidenceFake) * 100}%` }}
+                                 style={{ width: `${displayScore}%` }}
                                />
                             </div>
 
@@ -519,7 +532,7 @@ export default function App() {
                                 </div>
                             )}
 
-                            {/* SUGGESTION SECTION - NEW! */}
+                            {/* SUGGESTION SECTION */}
                             {result.suggestion && (
                                 <div className="bg-amber-50/50 rounded-2xl p-6 border border-amber-100 mb-6 text-center">
                                     <h4 className="font-bold text-amber-900 mb-2 flex items-center justify-center gap-2">
