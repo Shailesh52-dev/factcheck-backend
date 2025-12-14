@@ -11,11 +11,9 @@ import urllib.parse
 app = FastAPI(title="FactCheck AI Backend")
 
 # --- CORS Configuration ---
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000", 
-]
+# TEMPORARY FIX: We are setting allow_origins=["*"] to ensure the Vercel connection works.
+# Once we confirm the connection, we should replace "*" with the specific Vercel URL.
+origins = ["*"] 
 
 app.add_middleware(
     CORSMiddleware,
@@ -174,7 +172,7 @@ def analyze_content(text: str, source_type: str = "text"):
         "confidenceReal": round(conf_real, 4),
         "confidenceFake": round(conf_fake, 4),
         "factors": factors,
-        "related_news": related_news,    # Live results
+        "related_news": related_news,      # Live results
         "verification_tools": verification_tools # Static tools
     }
 
@@ -203,7 +201,7 @@ async def predict_url(request: UrlRequest):
         full_text = title + " " + " ".join(paragraphs[:5])
         
         if len(full_text) < 50:
-             raise HTTPException(status_code=400, detail="Could not extract text.")
+            raise HTTPException(status_code=400, detail="Could not extract text.")
 
         return analyze_content(full_text, "url")
     except Exception as e:
