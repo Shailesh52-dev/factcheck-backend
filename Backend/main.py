@@ -76,7 +76,6 @@ def check_nli_remote(text):
     api_url = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
     headers = {"Authorization": f"Bearer {hf_token}"}
     
-    # UPDATED LABELS: Mapped to "Fact | Hypothesis | Speculation | Opinion" strategy
     payload = {
         "inputs": text,
         "parameters": {
@@ -200,7 +199,7 @@ def analyze_content(text: str, source_type: str = "text"):
     if not has_trusted:
         found_vague = [w for w in vague_sources if w in text_lower]
         if found_vague:
-            source_score -= 25
+            source_score -= 15
             factors.append(f"🚩 Source Specificity: Relies on vague attribution ('{found_vague[0]}').")
     
     source_score = max(0, min(100, source_score))
@@ -250,7 +249,7 @@ def analyze_content(text: str, source_type: str = "text"):
             
     if detected_domain:
         if evidence_score < 40:
-            risk_penalty = 25.0
+            risk_penalty = 15.0
             factors.append(f"⚠️ Domain Risk ({detected_domain}): Topic requires high evidentiary standards which are missing.")
         
         anecdotal = ["worked for me", "i tried", "simple trick", "believe me", "my friend", "grandmother", "ancestors"]
@@ -258,43 +257,44 @@ def analyze_content(text: str, source_type: str = "text"):
             risk_penalty += 20.0
             factors.append("🚩 Domain Risk: Anecdotal evidence is invalid for high-stakes topics.")
 
-    # --- 9. NLI Threshold Tuning (UPDATED Strategy with Edge-Case Protection) ---
+    # --- 6. Absence of Evidence Rule ---
+    absence_phrases = [
+        "no conclusive evidence", "no scientific evidence", "no proven link", 
+        "has not been shown", "lack of evidence", "no evidence to support", "unproven"
+    ]
+    has_absence_language = any(p in text_lower for p in absence_phrases)
+
+    # --- 9. NLI Threshold Tuning ---
     nli_result = check_nli_remote(text)
     if nli_result and 'labels' in nli_result:
         top_label = nli_result['labels'][0]
         top_score = nli_result['scores'][0]
         
-        # EDGE CASE 1: Ignore Low Confidence NLI (< 0.5)
         if top_score < 0.50:
-            pass # Do nothing, rely on heuristics
-            
+            pass 
         else:
-            # EDGE CASE 2: Don't double-penalize if Language is already flagged
-            # If language score is low (< 50), the text is already heavily penalized for style.
-            # We avoid stacking NLI penalties to prevent score collapse.
             language_already_penalized = lang_score < 50
 
-            # FACT: Requires Evidence
             if top_label == "fact" and top_score >= 0.75:
                 if evidence_score < 40:
-                    if not language_already_penalized:
-                        risk_penalty += 30.0 # Heavy penalty
+                    if not language_already_penalized and not has_absence_language:
+                        risk_penalty += 30.0 
                         factors.append(f"🚩 NLI Analysis: Stated as Fact ({int(top_score*100)}% conf) but lacks supporting evidence.")
+                    elif has_absence_language:
+                        factors.append("✅ NLI Analysis: Correctly identifies a factual absence of evidence.")
                 else:
                     evidence_score += 20
                     factors.append(f"✅ NLI Analysis: Validated as a factual claim supported by evidence.")
 
-            # HYPOTHESIS: Reduce Claim Strength (Caution is good)
             elif top_label == "hypothesis" and top_score >= 0.70:
                 if has_absolute:
                     if not language_already_penalized:
                         risk_penalty += 20.0
                         factors.append("🚩 NLI Analysis: Contradiction. Text claims certainty, but AI detects hypothesis.")
                 else:
-                    claim_score += 15 # Reward for being a hypothesis (honest speculation)
+                    claim_score += 15
                     factors.append(f"ℹ️ NLI Analysis: Identified as Hypothesis ({int(top_score*100)}%). Treated as unverified theory.")
 
-            # SPECULATION: Strong Reduction
             elif top_label == "speculation" and top_score >= 0.70:
                 if evidence_score < 20:
                     if not language_already_penalized:
@@ -303,28 +303,40 @@ def analyze_content(text: str, source_type: str = "text"):
                 else:
                      factors.append(f"ℹ️ NLI Analysis: Content is speculative.")
 
-            # OPINION: Cap Claim Strength
             elif top_label == "opinion" and top_score >= 0.60:
-                # Opinions cannot be "Real" news facts. Cap the real signals.
                 if evidence_score > 50: evidence_score = 50 
                 factors.append(f"ℹ️ NLI Analysis: Content is primarily Opinion ({int(top_score*100)}%).")
 
+    if has_strong_claim and has_weak_evidence and not has_strong_evidence:
+        if has_absence_language:
+            real_score += 10.0
+            factors.append("✅ Precision: Correctly notes the absence of evidence/proof.")
+        else:
+            fake_score = 0
+            claim_score -= 20
+            factors.append("🚩 Claim-Evidence Mismatch: Absolute claims supported only by weak/observational language.")
 
-    # --- FINAL SCORE CALCULATION ---
+    # --- FINAL SCORE CALCULATION & CALIBRATION ---
     final_score = (lang_score * 0.30) + \
                   (evidence_score * 0.30) + \
                   (source_score * 0.20) + \
                   (claim_score * 0.20) - \
                   risk_penalty
                   
+    if evidence_score < 10 and final_score > 65:
+        final_score = 65.0
+    
+    if lang_score < 40 and final_score > 60:
+        final_score = 60.0
+        
     final_score = max(0, min(100, final_score))
     
     # --- Classification Logic ---
-    if final_score >= 70:
+    if final_score >= 75:
         classification = "Real"
         conf_real = final_score / 100.0
         conf_fake = 1 - conf_real
-    elif final_score <= 45:
+    elif final_score <= 40:
         classification = "Fake"
         conf_fake = (100 - final_score) / 100.0
         conf_real = 1 - conf_fake
@@ -360,6 +372,25 @@ def analyze_content(text: str, source_type: str = "text"):
     else:
         explanation = f"Rated as Unverified (Score: {int(final_score)}/100). While no obvious fabrication was detected, the content lacks sufficient evidence or specific sourcing to be confirmed as fact."
 
+    # --- 13. Improvement Suggestion (NEW Feature) ---
+    suggestion = ""
+    if classification == "Real":
+        suggestion = "No major improvements needed. The content appears well-sourced and neutral."
+    else:
+        # Priority Logic: Fixing the biggest penalty first
+        if risk_penalty > 0:
+            suggestion = "For high-stakes topics (Health/Finance), cite specific clinical trials or official government reports to prove your claim."
+        elif evidence_score < 40:
+            suggestion = "Linking a peer-reviewed study, official report, or verifiable data source would significantly increase credibility."
+        elif source_score < 40:
+            suggestion = "Naming specific organizations or experts (e.g., 'WHO stated...') instead of vague groups ('experts say...') would improve reliability."
+        elif lang_score < 60:
+            suggestion = "The tone is too sensational. Removing emotional words (e.g., 'shocking', 'miracle') and using objective language would boost the score."
+        elif claim_score < 40:
+            suggestion = "The claim is framed too strongly for the available evidence. Consider using more cautious language (e.g., 'suggests' instead of 'proves')."
+        else:
+             suggestion = "Adding verifiable details such as dates, locations, or direct quotes would strengthen the analysis."
+
     related_news = search_google_news(text)
     
     verification_tools = [
@@ -373,6 +404,7 @@ def analyze_content(text: str, source_type: str = "text"):
         "confidenceFake": round(conf_fake, 4),
         "factors": factors,
         "explanation": explanation,
+        "suggestion": suggestion,   # New Field
         "related_news": related_news,
         "verification_tools": verification_tools
     }
@@ -414,10 +446,13 @@ async def predict_url(request: UrlRequest):
 
 @app.post("/predict_image")
 async def predict_image(file: UploadFile = File(...)):
+    # 0. Check file size (Hard limit: 1MB to prevent OOM/timeouts on free tier)
+    contents = await file.read()
+    if len(contents) > 1 * 1024 * 1024:
+         raise HTTPException(status_code=413, detail="File size exceeds 1MB limit.")
+
     # 1. Try Real OCR via external API (OCR.space)
     try:
-        contents = await file.read()
-        
         # Use env var for key if available, else fallback to 'helloworld'
         ocr_key = os.getenv("OCR_API_KEY", "helloworld")
         

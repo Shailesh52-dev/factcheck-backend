@@ -508,12 +508,25 @@ export default function App() {
                                />
                             </div>
 
-                            {/* EXPLANATION SECTION - NEW! */}
+                            {/* EXPLANATION SECTION */}
                             {result.explanation && (
                                 <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 mb-6 text-center">
                                     <h4 className="font-bold text-indigo-900 mb-2">Analysis Summary</h4>
                                     <p className="text-indigo-800 text-sm leading-relaxed font-medium">
                                         {result.explanation}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* SUGGESTION SECTION - NEW! */}
+                            {result.suggestion && (
+                                <div className="bg-amber-50/50 rounded-2xl p-6 border border-amber-100 mb-6 text-center">
+                                    <h4 className="font-bold text-amber-900 mb-2 flex items-center justify-center gap-2">
+                                        <Lightbulb className="w-4 h-4 text-amber-600" />
+                                        How to Improve Credibility
+                                    </h4>
+                                    <p className="text-amber-800 text-sm leading-relaxed font-medium">
+                                        {result.suggestion}
                                     </p>
                                 </div>
                             )}
