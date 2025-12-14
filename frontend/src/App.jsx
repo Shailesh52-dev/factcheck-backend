@@ -163,7 +163,7 @@ export default function App() {
     if (activeTab === 'image') analyzeImage();
   };
 
-  // Helper to determine styles based on classification
+  // Helper to determine styles based on classification (Includes UNVERIFIED)
   const getResultStyles = (classification) => {
     if (classification === 'Fake') {
         return {
@@ -181,7 +181,7 @@ export default function App() {
             icon: <ShieldCheck className="w-6 h-6" />,
             label: "Credible Source"
         };
-    } else { // Unverified
+    } else { // Unverified (Amber/Yellow)
         return {
             container: 'bg-amber-50 border-amber-100 text-amber-700',
             shadow: 'shadow-amber-500/10',
