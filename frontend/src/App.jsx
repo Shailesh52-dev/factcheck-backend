@@ -5,10 +5,10 @@ import {
   Cpu, Database, Code, Zap, Brain, Layout, Server, GitBranch, ArrowRight, ExternalLink, Globe, Lightbulb
 } from 'lucide-react';
 
-// !!! IMPORTANT FOR DEPLOYMENT !!!
-// Change this URL to your live backend server URL (e.g., https://your-backend.onrender.com)
-// when deploying the frontend to the web. Keep as localhost for local testing.
-const API_BASE_URL = "http://127.0.0.1:8000";
+// !!! FINAL DEPLOYMENT FIX: HARDCODE LIVE URL (Safest Method for Immediate Functionality) !!!
+// The backend is confirmed live at this URL. This bypasses Vercel's complex environment variable
+// injection process which was causing the 'process is not defined' error.
+const API_BASE_URL = "https://factcheck-backend-xiyn.onrender.com";
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home'); // 'home' or 'about'
@@ -102,7 +102,10 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/predict_text`, {
+      // Use the API_BASE_URL and the /analyze path alias (which we fixed on the backend)
+      const apiUrl = `${API_BASE_URL}/analyze`;
+                     
+      const response = await fetch(apiUrl, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText }),
@@ -111,7 +114,8 @@ export default function App() {
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError("Could not connect to the backend. Make sure main.py is running!");
+      // General error message covers CORS, 404, or network failure
+      setError("Could not connect to the backend. The service may be temporarily down or a network configuration error exists.");
     } finally {
       setLoading(false);
     }
@@ -279,7 +283,7 @@ export default function App() {
             title="Read about the project"
           >
             <div className="w-10 h-10 bg-indigo-700 rounded-lg flex items-center justify-center shadow-md shadow-indigo-200 group-hover:bg-indigo-800 transition-colors">
-              <ShieldCheck className="text-white w-6 h-6" />
+              <ShieldCheck className="w-6 h-6 text-white" />
             </div>
             <span className="text-xl font-bold text-gray-900 tracking-tight group-hover:text-indigo-700 transition-colors">
               FactCheck <span className="text-cyan-500">AI</span>
