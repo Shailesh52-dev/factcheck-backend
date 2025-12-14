@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 // !!! FINAL DEPLOYMENT FIX: HARDCODE LIVE URL (Safest Method for Immediate Functionality) !!!
+// Using the direct Render URL avoids 'process is not defined' errors in client-side code.
 const API_BASE_URL = "https://factcheck-backend-xiyn.onrender.com";
 
 export default function App() {
@@ -108,8 +109,8 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const apiUrl = `${API_BASE_URL}/analyze`;
-      const response = await fetch(apiUrl, { 
+      // Use API_BASE_URL + /analyze path for robust connection
+      const response = await fetch(`${API_BASE_URL}/analyze`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText }),

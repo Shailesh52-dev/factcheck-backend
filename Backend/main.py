@@ -76,6 +76,7 @@ def check_nli_remote(text):
     api_url = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
     headers = {"Authorization": f"Bearer {hf_token}"}
     
+    # UPDATED LABELS: Mapped to "Fact | Hypothesis | Speculation | Opinion" strategy
     payload = {
         "inputs": text,
         "parameters": {
@@ -128,9 +129,11 @@ def analyze_content(text: str, source_type: str = "text"):
     elif subjectivity < 0.2:
         factors.append("✅ Language Integrity: Tone is neutral and objective.")
 
-    if abs(polarity) > 0.8:
+    # Polarity Check Update: Only penalize extreme emotion if it is ALSO subjective.
+    # Real news (shootings, disasters) is often negative but objective.
+    if abs(polarity) > 0.8 and subjectivity > 0.5:
         lang_score -= 15
-        factors.append("🚩 Language Integrity: Extremely emotional language.")
+        factors.append("🚩 Language Integrity: Extremely emotional and subjective language.")
 
     if len(text) > 20 and sum(1 for c in text if c.isupper()) / len(text) > 0.5:
         lang_score -= 20
@@ -145,11 +148,11 @@ def analyze_content(text: str, source_type: str = "text"):
     strong_evidence = [
         "clinical trial", "peer-reviewed", "meta-analysis", "systematic review", 
         "published in", "official report", "court documents", "police report", 
-        "data shows", "scientific study", "evidence suggests"
+        "data shows", "scientific study", "evidence suggests", "statement by"
     ]
     medium_evidence = [
         "study", "research", "survey", "according to", "statement", "announced", 
-        "journal", "report"
+        "journal", "report", "investigation", "authorities", "witnesses", "incident"
     ]
     
     found_strong = [w for w in strong_evidence if w in text_lower]
@@ -175,7 +178,7 @@ def analyze_content(text: str, source_type: str = "text"):
     trusted_orgs = [
         "who", "cdc", "nasa", "fda", "un", "nato", "reuters", "ap", "afp", "bbc", 
         "cnn", "isro", "rbi", "sebi", "iit", "aiims", "government", "ministry", 
-        "department", "university", "police"
+        "department", "university", "police", "fbi", "cia", "authorities"
     ]
     
     vague_sources = [
@@ -185,7 +188,7 @@ def analyze_content(text: str, source_type: str = "text"):
         "growing body of evidence", "up to us to decide"
     ]
     
-    citation_context_words = ["said", "reported", "announced", "warned", "stated", "published", "released"]
+    citation_context_words = ["said", "reported", "announced", "warned", "stated", "published", "released", "confirmed"]
     
     has_trusted = False
     for org in trusted_orgs:
@@ -212,7 +215,7 @@ def analyze_content(text: str, source_type: str = "text"):
         "proven", "guaranteed", "100%", "permanently", "cure", "undoubtedly", 
         "definitely", "miracle", "banned by doctors"
     ]
-    cautious = ["suggests", "might", "potential", "likely", "estimated", "appears to"]
+    cautious = ["suggests", "might", "potential", "likely", "estimated", "appears to", "alleged"]
     
     has_absolute = any(w in text_lower for w in absolutes)
     has_cautious = any(w in text_lower for w in cautious)
@@ -434,11 +437,26 @@ async def predict_url(request: UrlRequest):
         response = requests.get(request.url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.content, 'html.parser')
         title = soup.title.string if soup.title else ""
-        paragraphs = [p.get_text() for p in soup.find_all('p')]
-        full_text = title + " " + " ".join(paragraphs[:5])
+        
+        # --- IMPROVED SCRAPING ---
+        # 1. Fetch all paragraphs
+        all_paragraphs = [p.get_text().strip() for p in soup.find_all('p')]
+        # 2. Filter out short garbage (menus, cookies, footers)
+        meaningful_paragraphs = [p for p in all_paragraphs if len(p) > 50]
+        # 3. Take up to 7 paragraphs to ensure enough context
+        content_paragraphs = meaningful_paragraphs[:7] if meaningful_paragraphs else all_paragraphs[:5]
+        
+        # 4. Metadata Extraction (NEW) - Best source for summary
+        meta_desc = ""
+        meta_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+        if meta_tag and meta_tag.get("content"):
+            meta_desc = meta_tag["content"]
+
+        # Prepend metadata to text (it's usually the most accurate summary)
+        full_text = title + ". " + meta_desc + ". " + " ".join(content_paragraphs)
         
         if len(full_text) < 50:
-            raise HTTPException(status_code=400, detail="Could not extract text.")
+            raise HTTPException(status_code=400, detail="Could not extract enough text for analysis. Site may be blocking scrapers.")
 
         return analyze_content(full_text, "url")
     except Exception as e:
