@@ -75,7 +75,7 @@ def analyze_content(text: str, source_type: str = "text"):
     text_lower = text.lower()
     factors = [] 
     
-    # 1. Fake Indicators
+    # 1. Fake Indicators (Expanded)
     fake_triggers = {
         "shocking": "Uses emotionally charged language ('shocking').",
         "secret": "Claims to reveal 'secret' information.",
@@ -85,10 +85,15 @@ def analyze_content(text: str, source_type: str = "text"):
         "guaranteed": "Uses marketing-style language.",
         "share before deleted": "Creates artificial urgency.",
         "miracle": "Promises 'miracle' results.",
-        "censored": "Claims censorship to build false credibility."
+        "censored": "Claims censorship to build false credibility.",
+        "banned": "Claims item is 'banned' to create intrigue.",
+        "leaked": "Uses 'leaked' to imply forbidden knowledge.",
+        "viral": "Focuses on virality rather than facts.",
+        "you won't believe": "Clickbait phrasing detected.",
+        "end of the world": "Fear-mongering detected."
     }
     
-    # 2. Real Indicators
+    # 2. Real Indicators (Significantly Expanded)
     real_triggers = {
         "official": "Cites 'official' sources.",
         "report": "References a 'report' or structured document.",
@@ -96,7 +101,19 @@ def analyze_content(text: str, source_type: str = "text"):
         "according to": "Attributes information to a specific source.",
         "statement": "References a formal statement.",
         "analysis": "Indicates analytical depth.",
-        "confirmed": "Uses verification language ('confirmed')."
+        "confirmed": "Uses verification language ('confirmed').",
+        "government": "References government authority.",
+        "court": "References judicial proceedings.",
+        "police": "References law enforcement.",
+        "announced": "Uses standard reporting verb 'announced'.",
+        "said": "Uses neutral attribution verb 'said'.",
+        "deal": "References a business or diplomatic 'deal'.",
+        "signed": "References a formal agreement being 'signed'.",
+        "sources": "Attributes info to 'sources'.",
+        "minister": "References a government official.",
+        "department": "References an official department.",
+        "university": "Cites an academic institution.",
+        "research": "References scientific research."
     }
 
     fake_score = 0
@@ -121,22 +138,30 @@ def analyze_content(text: str, source_type: str = "text"):
         fake_score += 1
         factors.append("🚩 Excessive exclamation marks detected.")
 
-    # 4. Calculate Confidence
+    # 4. Calculate Confidence (Weighted Logic)
+    # If no triggers found, slightly favor Real if length is decent (news headlines are usually neutral)
     if fake_score == 0 and real_score == 0:
-        val = random.uniform(0.4, 0.6)
-        is_fake = val > 0.5
-        conf_fake = val if is_fake else 1 - val
-        conf_real = 1 - conf_fake
-        factors.append("ℹ️ No strong keyword triggers found; relying on linguistic structure.")
+        if len(text.split()) > 6:
+             # Neutral, grammatical sentences are usually real
+             conf_fake = 0.35 
+             conf_real = 0.65
+             factors.append("✅ No sensationalist keywords found; likely neutral reporting.")
+        else:
+             # Too short to tell
+             conf_fake = 0.5
+             conf_real = 0.5
+             factors.append("ℹ️ Text is too short for definitive analysis.")
     else:
         total = fake_score + real_score + 0.1
         conf_fake = fake_score / total
         conf_real = real_score / total
+        
+        # Boost the winner
         if conf_fake > conf_real:
-            conf_fake = min(0.98, conf_fake + 0.2)
+            conf_fake = min(0.99, conf_fake + 0.15)
             conf_real = 1 - conf_fake
         else:
-            conf_real = min(0.98, conf_real + 0.2)
+            conf_real = min(0.99, conf_real + 0.15)
             conf_fake = 1 - conf_real
 
     classification = "Fake" if conf_fake > conf_real else "Real"
