@@ -2,12 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   AlertCircle, CheckCircle, Upload, Link, Type, Loader2, 
   AlertTriangle, FileText, ShieldCheck, Sparkles, Github, 
-  Cpu, Database, Code, Zap, Brain, Layout, Server, GitBranch, ArrowRight, ExternalLink, Globe, Lightbulb
+  Cpu, Database, Code, Zap, Brain, Layout, Server, GitBranch, ArrowRight, ExternalLink, Globe, Lightbulb, HelpCircle
 } from 'lucide-react';
 
 // !!! FINAL DEPLOYMENT FIX: HARDCODE LIVE URL (Safest Method for Immediate Functionality) !!!
-// The backend is confirmed live at this URL. This bypasses Vercel's complex environment variable
-// injection process which was causing the 'process is not defined' error.
 const API_BASE_URL = "https://factcheck-backend-xiyn.onrender.com";
 
 export default function App() {
@@ -31,7 +29,7 @@ export default function App() {
     document.title = "FactCheck AI - Misinformation Detector";
   }, []);
 
-  // --- ROBUST FIX: Polling for Tailwind (Fixes Refresh/Cache Race Condition) ---
+  // --- ROBUST FIX: Polling for Tailwind ---
   useEffect(() => {
     if (window.tailwind) {
       setIsStyleReady(true);
@@ -64,7 +62,6 @@ export default function App() {
       clearTimeout(timeoutId);
     };
   }, []);
-  // -----------------------------------------------------------------------------
 
   // Navigation Helper
   const navigateTo = (page) => {
@@ -75,7 +72,6 @@ export default function App() {
   const handleNavToSection = (ref) => {
     if (currentPage !== 'home') {
         setCurrentPage('home');
-        // Small timeout to allow render before scrolling
         setTimeout(() => {
             if(ref.current) ref.current.scrollIntoView({ behavior: 'smooth' });
         }, 100);
@@ -84,7 +80,6 @@ export default function App() {
     }
   };
 
-  // Reset results when switching tabs
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setResult(null);
@@ -102,9 +97,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      // Use the API_BASE_URL and the /analyze path alias (which we fixed on the backend)
       const apiUrl = `${API_BASE_URL}/analyze`;
-                     
       const response = await fetch(apiUrl, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,7 +107,6 @@ export default function App() {
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      // General error message covers CORS, 404, or network failure
       setError("Could not connect to the backend. The service may be temporarily down or a network configuration error exists.");
     } finally {
       setLoading(false);
@@ -171,6 +163,35 @@ export default function App() {
     if (activeTab === 'image') analyzeImage();
   };
 
+  // Helper to determine styles based on classification
+  const getResultStyles = (classification) => {
+    if (classification === 'Fake') {
+        return {
+            container: 'bg-rose-50 border-rose-100 text-rose-700',
+            shadow: 'shadow-rose-500/10',
+            bar: 'bg-rose-600',
+            icon: <AlertTriangle className="w-6 h-6" />,
+            label: "Likely Misinformation"
+        };
+    } else if (classification === 'Real') {
+        return {
+            container: 'bg-emerald-50 border-emerald-100 text-emerald-700',
+            shadow: 'shadow-emerald-500/10',
+            bar: 'bg-emerald-500',
+            icon: <ShieldCheck className="w-6 h-6" />,
+            label: "Credible Source"
+        };
+    } else { // Unverified
+        return {
+            container: 'bg-amber-50 border-amber-100 text-amber-700',
+            shadow: 'shadow-amber-500/10',
+            bar: 'bg-amber-500',
+            icon: <HelpCircle className="w-6 h-6" />,
+            label: "Unverified / Needs Sources"
+        };
+    }
+  };
+
   if (!isStyleReady) {
     return (
       <div style={{
@@ -204,21 +225,17 @@ export default function App() {
                 <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" /> 
                 Back to Analyzer
             </button>
-            
             <div className="bg-white/60 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/60 ring-1 ring-gray-100/50 p-8 md:p-12">
                 <h1 className="text-4xl md:text-5xl font-black text-gray-900 mb-8 tracking-tight">
                     Why <span className="text-indigo-700">FactCheck AI</span>?
                 </h1>
-                
                 <div className="prose prose-lg text-gray-600 leading-relaxed">
                     <p className="text-xl font-medium text-gray-800 mb-8">
                         In an age where information travels faster than truth, misinformation has become one of the most significant challenges of our digital society.
                     </p>
-                    
                     <p className="mb-6">
                         We built <strong>FactCheck AI</strong> as a response to this growing problem. What started as a collective curiosity about how Natural Language Processing (NLP) could be applied to real-world problems quickly evolved into this project. Our goal was simple: provide a tool that acts as a first line of defense against sensationalism.
                     </p>
-
                     <div className="my-10 p-6 bg-indigo-50/50 rounded-2xl border border-indigo-100">
                         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                             <Lightbulb className="w-5 h-5 text-amber-500" />
@@ -228,12 +245,10 @@ export default function App() {
                             During scrolling sessions on social media, we noticed how difficult it was to verify claims without opening ten different tabs. We wanted to create something that could ingest a headline, a link, or even a screenshot, and give an immediate "probabilistic check" on its credibility.
                         </p>
                     </div>
-                    
                     <h3 className="text-2xl font-bold text-gray-900 mb-6">How It Was Built</h3>
                     <p className="mb-6">
                         This project combines several modern technologies to create a seamless experience. It leverages <strong>DistilBERT</strong>, a smaller, faster, cheaper and lighter version of BERT, to understand the semantic context of news titles and articles.
                     </p>
-
                     <div className="grid md:grid-cols-2 gap-4 not-prose mb-8">
                         <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-start gap-3">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg shrink-0"><Brain className="w-5 h-5"/></div>
@@ -250,7 +265,6 @@ export default function App() {
                             </div>
                         </div>
                     </div>
-
                     <p>
                         This is an open-source project intended for educational purposes. It represents a step towards a future where AI helps us navigate the complexities of the information age with greater confidence and clarity.
                     </p>
@@ -259,6 +273,8 @@ export default function App() {
         </div>
     </div>
   );
+
+  const resultStyle = result ? getResultStyles(result.classification) : null;
 
   return (
     <div 
@@ -436,9 +452,9 @@ export default function App() {
                 </div>
 
                 {/* Results Area */}
-                {result && (
+                {result && resultStyle && (
                   <div className="mt-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    <div className={`p-1.5 rounded-3xl bg-white/55 backdrop-blur-md border border-white/60 shadow-xl ${result.classification === 'Fake' ? 'shadow-rose-500/10' : 'shadow-emerald-500/10'}`}>
+                    <div className={`p-1.5 rounded-3xl bg-white/55 backdrop-blur-md border border-white/60 shadow-xl ${resultStyle.shadow}`}>
                         <div className="bg-white rounded-[22px] p-8 md:p-10 border border-gray-100">
                             
                             <div className="text-center mb-8">
@@ -447,14 +463,10 @@ export default function App() {
                             </div>
 
                             <div className="flex flex-col items-center justify-center gap-4 mb-8">
-                                 <div className={`flex items-center gap-3 px-6 py-3 rounded-full border-2 ${
-                                    result.classification === 'Fake' 
-                                        ? 'bg-rose-50 border-rose-100 text-rose-700' 
-                                        : 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                                 }`}>
-                                     {result.classification === 'Fake' ? <AlertTriangle className="w-6 h-6" /> : <ShieldCheck className="w-6 h-6" />}
+                                 <div className={`flex items-center gap-3 px-6 py-3 rounded-full border-2 ${resultStyle.container}`}>
+                                     {resultStyle.icon}
                                      <span className="text-lg font-bold tracking-tight">
-                                        {result.classification === 'Fake' ? "Likely Misinformation" : "Credible Source"}
+                                        {resultStyle.label}
                                      </span>
                                  </div>
                                  
@@ -465,10 +477,20 @@ export default function App() {
 
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden mb-10 max-w-md mx-auto relative shadow-inner">
                                <div 
-                                 className={`h-full rounded-full transition-all duration-1000 ${result.classification === 'Fake' ? 'bg-rose-600' : 'bg-emerald-500'}`}
+                                 className={`h-full rounded-full transition-all duration-1000 ${resultStyle.bar}`}
                                  style={{ width: `${Math.max(result.confidenceReal, result.confidenceFake) * 100}%` }}
                                />
                             </div>
+
+                            {/* EXPLANATION SECTION - NEW! */}
+                            {result.explanation && (
+                                <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 mb-6 text-center">
+                                    <h4 className="font-bold text-indigo-900 mb-2">Analysis Summary</h4>
+                                    <p className="text-indigo-800 text-sm leading-relaxed font-medium">
+                                        {result.explanation}
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="bg-gray-50 rounded-2xl p-6 border border-gray-200 mb-6">
                                 <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -486,29 +508,10 @@ export default function App() {
                                             </li>
                                         ))
                                     ) : (
-                                        result.classification === 'Fake' ? (
-                                            <>
-                                                <li className="flex items-start gap-2">
-                                                    <span className="text-rose-600 mt-0.5">•</span>
-                                                    Sensational or emotionally charged language patterns detected.
-                                                </li>
-                                                <li className="flex items-start gap-2">
-                                                    <span className="text-rose-600 mt-0.5">•</span>
-                                                    Lack of verifiable sourcing structure common in credible journalism.
-                                                </li>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <li className="flex items-start gap-2">
-                                                    <span className="text-emerald-500 mt-0.5">•</span>
-                                                    Consistent factual structure and neutral tone identified.
-                                                </li>
-                                                <li className="flex items-start gap-2">
-                                                    <span className="text-emerald-500 mt-0.5">•</span>
-                                                    Verification cross-references suggest standard reporting practices.
-                                                </li>
-                                            </>
-                                        )
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-gray-400 mt-0.5">•</span>
+                                            No specific linguistic triggers were found.
+                                        </li>
                                     )}
                                 </ul>
                             </div>

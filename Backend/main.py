@@ -6,14 +6,13 @@ import requests
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import urllib.parse
-from textblob import TextBlob # Import for Sentiment Analysis
+from textblob import TextBlob 
+import os # Import os to read environment variables
 
 # Initialize App
 app = FastAPI(title="FactCheck AI Backend")
 
 # --- CORS Configuration ---
-# TEMPORARY FIX: We are setting allow_origins=["*"] to ensure the Vercel connection works.
-# Once we confirm the connection, we should replace "*" with the specific Vercel URL.
 origins = ["*"] 
 
 app.add_middleware(
@@ -71,12 +70,39 @@ def search_google_news(query_text):
         print(f"Search Error: {e}")
         return []
 
+# --- Helper: Remote NLI Assistant (Hugging Face API) ---
+# This uses a powerful Transformer model remotely to check if text is Fact, Opinion, or Conspiracy.
+def check_nli_remote(text):
+    hf_token = os.getenv("HF_API_KEY") # Get key from Render Environment Variables
+    if not hf_token:
+        return None # Skip if no key is set (graceful fallback)
+
+    api_url = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    
+    # We ask the model to classify the text into these categories (Zero-Shot Classification)
+    payload = {
+        "inputs": text,
+        "parameters": {
+            "candidate_labels": ["factual reporting", "personal opinion", "conspiracy theory", "satire"],
+            "multi_label": False
+        }
+    }
+
+    try:
+        response = requests.post(api_url, headers=headers, json=payload, timeout=2.5)
+        if response.status_code != 200:
+            return None
+        return response.json()
+    except:
+        return None
+
 # --- Smart Analysis Logic ---
 def analyze_content(text: str, source_type: str = "text"):
     text_lower = text.lower()
     factors = [] 
     
-    # --- 0. Sentiment Analysis (New Feature) ---
+    # --- 0. Sentiment Analysis ---
     blob = TextBlob(text)
     sentiment = blob.sentiment
     subjectivity = sentiment.subjectivity # 0.0 (Objective) to 1.0 (Subjective)
@@ -85,7 +111,7 @@ def analyze_content(text: str, source_type: str = "text"):
     fake_score = 0
     real_score = 0
 
-    # Subjectivity Check: Real news is usually objective (low subjectivity)
+    # Subjectivity Check
     if subjectivity > 0.5:
         fake_score += 2.0
         factors.append(f"🚩 High subjectivity detected ({round(subjectivity*100)}%). Content appears opinionated rather than factual.")
@@ -93,12 +119,12 @@ def analyze_content(text: str, source_type: str = "text"):
         real_score += 1.0
         factors.append("✅ Tone is objective and neutral (Low subjectivity).")
 
-    # Polarity Check: Real news is rarely extremely emotional
+    # Polarity Check
     if abs(polarity) > 0.8:
         fake_score += 1.5
         factors.append("🚩 Extremely emotional language detected.")
 
-    # 1. Fake Indicators (Expanded with Health Scams & Conspiracies)
+    # 1. Fake Indicators
     fake_triggers = {
         "shocking": "Uses emotionally charged language ('shocking').",
         "secret": "Claims to reveal 'secret' information.",
@@ -126,8 +152,22 @@ def analyze_content(text: str, source_type: str = "text"):
         "government plot": "Directly alleges conspiracy without evidence.",
         "hidden agenda": "Implies malicious intent without proof."
     }
+
+    # 2. Professional Misinformation Phrase Patterns
+    vague_patterns = {
+        "experts familiar with": "Uses vague 'experts' to imply insider knowledge without naming sources.",
+        "sources close to": "Relying on unnamed 'close sources' is a common trope in unverified leaks.",
+        "according to internal": "Cites 'internal' sources without providing documents.",
+        "it is believed that": "Uses passive voice to state opinions as facts without attribution.",
+        "questions are being asked": "Uses passive framing to imply controversy where none may exist.",
+        "anonymous sources confirm": "Uses anonymity to shield the source from verification.",
+        "it has been revealed": "Passive voice implies a revelation without stating who revealed it.",
+        "growing body of evidence": "Vague appeal to 'evidence' without citing specific studies.",
+        "many people are saying": "Classic 'Bandwagon' propaganda technique.",
+        "up to us to decide": "Appeals to emotion rather than fact."
+    }
     
-    # 2. Real Indicators (Significantly Expanded)
+    # 3. Real Indicators
     real_triggers = {
         "official": "Cites 'official' sources.",
         "report": "References a 'report' or structured document.",
@@ -151,17 +191,17 @@ def analyze_content(text: str, source_type: str = "text"):
         "published in": "Cites a publication venue.",
         "journal": "References academic or professional journals.",
         "spokesperson": "Attributes quote to an official representative.",
-        "evidence suggests": "Uses cautious, scientific language."
+        "evidence suggests": "Uses cautious, scientific language.",
+        "experts": "Attributes info to domain experts.",
+        "analysts": "Attributes info to professional analysts."
     }
 
-    # 3. Trusted Source Mentions (New Category - STRICTER)
-    # Acronyms are only trusted if accompanied by citation context.
+    # 4. Trusted Source Mentions
     trusted_sources = [
         "who", "cdc", "nasa", "fda", "un", "nato", "reuters", "ap", "afp", "bbc", 
         "cnn", "nytimes", "washington post", "guardian", "isro", "rbi", "sebi", "iit", "aiims"
     ]
     
-    # Context words that suggest a verifiable source
     valid_citation_context = [
         "report", "study", "journal", "published", "publication", "statement", "released", 
         "official", "data", "link", "website", "202", "201", "according to", "cited"
@@ -172,6 +212,12 @@ def analyze_content(text: str, source_type: str = "text"):
         if word in text_lower:
             fake_score += 1.5 
             factors.append(f"🚩 {reason}")
+
+    # Check Vague Phrase Patterns
+    for phrase, reason in vague_patterns.items():
+        if phrase in text_lower:
+            fake_score += 2.0
+            factors.append(f"🚩 Phrase Pattern Detected: {reason}")
             
     # Check Real Triggers
     for word, reason in real_triggers.items():
@@ -179,20 +225,15 @@ def analyze_content(text: str, source_type: str = "text"):
             real_score += 1
             factors.append(f"✅ {reason}")
 
-    # Check Trusted Sources (Boost Real Score - Context Aware)
+    # Check Trusted Sources
     for source in trusted_sources:
-        if f" {source} " in f" {text_lower} " or f"{source}." in text_lower: # basic word boundary check
-            # Check if any citation context exists in the text
+        if f" {source} " in f" {text_lower} " or f"{source}." in text_lower:
             has_context = any(ctx in text_lower for ctx in valid_citation_context)
-            
             if has_context:
                 real_score += 2.0
                 factors.append(f"✅ Cites reputable entity ('{source.upper()}') with verifiable context.")
-            else:
-                # Do NOT boost if no context. Just naming "WHO" isn't enough.
-                pass
 
-    # 4. Structural Checks
+    # 5. Structural Checks
     if len(text) > 20 and sum(1 for c in text if c.isupper()) / len(text) > 0.6:
         fake_score += 2
         factors.append("🚩 Excessive use of capitalization detected.")
@@ -201,8 +242,7 @@ def analyze_content(text: str, source_type: str = "text"):
         fake_score += 1
         factors.append("🚩 Excessive exclamation marks detected.")
 
-    # 5. Contextual Logic (The "Robustness" Layer)
-    # If text makes medical claims ("cure", "doctor", "health") but lacks scientific backing triggers ("study", "journal"), penalize it.
+    # 6. Contextual Logic
     medical_keywords = ["cure", "medicine", "health", "doctor", "treatment", "virus", "disease", "diabetes", "cancer", "brain", "blood", "human body"]
     has_medical_context = any(word in text_lower for word in medical_keywords)
     has_scientific_backing = any(word in text_lower for word in ["study", "research", "journal", "clinical", "trial", "published", "report"])
@@ -211,57 +251,136 @@ def analyze_content(text: str, source_type: str = "text"):
         fake_score += 2.0
         factors.append("🚩 Makes medical claims without citing studies, trials, or reports.")
 
-    # --- Contradiction Detector (NEW FIX) ---
-    # Detects "Secret Study" or "Hidden Report" - Valid research is rarely secret.
+    # --- Contradiction Detector ---
     if "secret" in text_lower and ("study" in text_lower or "report" in text_lower):
         fake_score += 3.0
         factors.append("🚩 Contradictory sourcing detected: legitimate scientific studies are rarely 'secret'.")
 
-    # 6. Calculate Confidence (Weighted Logic)
-    # If no triggers found, heavily rely on sentiment and structure
+    # --- 7. Claim-Evidence Alignment Check ---
+    strong_claim_words = ["cure", "proven", "guaranteed", "100%", "miracle", "permanently", "undoubtedly", "definitely"]
+    weak_evidence_words = ["suggests", "might", "could", "linked to", "associated with", "survey", "observation", "potential", "preliminary"]
+    strong_evidence_words = ["clinical trial", "randomized", "peer-reviewed", "meta-analysis", "systematic review", "conclusive", "consensus"]
+
+    has_strong_claim = any(word in text_lower for word in strong_claim_words)
+    has_weak_evidence = any(word in text_lower for word in weak_evidence_words)
+    has_strong_evidence = any(word in text_lower for word in strong_evidence_words)
+
+    if has_strong_claim and has_weak_evidence and not has_strong_evidence:
+        fake_score += 2.5
+        factors.append("🚩 Claim-Evidence Mismatch: Absolute claims supported only by weak/observational language.")
+
+    if has_strong_claim and has_strong_evidence:
+        real_score += 2.5
+        factors.append("✅ Claim-Evidence Alignment: Strong claims backed by robust scientific terminology.")
+
+    # --- 8. High-Risk Domain Multiplier ---
+    high_risk_domains = {
+        "Health & Medicine": ["medicine", "doctor", "health", "virus", "disease", "cancer", "diabetes", "vaccine", "cure", "treatment", "patient", "hospital", "weight loss", "diet", "nutrition"],
+        "Finance": ["stock", "market", "crypto", "bitcoin", "invest", "profit", "bank", "economy", "dollar", "rupee", "crash", "wealth"],
+        "Politics": ["election", "vote", "poll", "government", "senate", "parliament", "congress", "president", "minister", "law", "ballot", "voting"]
+    }
+    
+    detected_domain = None
+    for domain, keywords in high_risk_domains.items():
+        if any(k in text_lower for k in keywords):
+            detected_domain = domain
+            break
+            
+    if detected_domain:
+        if real_score < 2.0:
+            fake_score += 2.0
+            factors.append(f"⚠️ High-Risk Topic ({detected_domain}): Requires strict verifiable sourcing (studies, official reports) which is missing.")
+            
+        anecdotal_phrases = ["worked for me", "i tried", "simple trick", "just one", "my friend", "grandmother", "ancestors", "believe me"]
+        if any(p in text_lower for p in anecdotal_phrases):
+            fake_score += 2.0
+            factors.append(f"🚩 High-Risk Topic: Anecdotal evidence ('worked for me') is not scientific proof.")
+
+    # --- 9. Remote NLI Check (NEW) ---
+    # Ask the Transformer model: "Is this fact, opinion, or conspiracy?"
+    nli_result = check_nli_remote(text)
+    if nli_result and 'labels' in nli_result:
+        top_label = nli_result['labels'][0]
+        top_score = nli_result['scores'][0]
+        
+        if top_score > 0.6: # Only act if model is confident
+            if top_label == "conspiracy theory":
+                fake_score += 3.0
+                factors.append(f"🚩 AI Deep Analysis: Transformer model classified content as '{top_label}'.")
+            elif top_label == "personal opinion":
+                fake_score += 1.5
+                factors.append(f"🚩 AI Deep Analysis: Classified as subjective '{top_label}' rather than fact.")
+            elif top_label == "factual reporting":
+                real_score += 2.5
+                factors.append(f"✅ AI Deep Analysis: Transformer model classified content as '{top_label}'.")
+
+    # 10. Calculate Confidence
+    CONFIDENCE_THRESHOLD = 0.60 
+
     if fake_score == 0 and real_score == 0:
-        if subjectivity < 0.4 and len(text.split()) > 6:
-             # Neutral, grammatical sentences are likely real
-             conf_fake = 0.3 
-             conf_real = 0.7
-             factors.append("✅ No sensationalism found and tone is objective.")
-        elif subjectivity > 0.6:
-             conf_fake = 0.65
-             conf_real = 0.35
-             factors.append("ℹ️ High subjectivity suggests opinion, but no specific fake keywords found.")
+        classification = "Unverified"
+        conf_fake = 0.5
+        conf_real = 0.5
+        if subjectivity > 0.6:
+             factors.append("ℹ️ High subjectivity suggests opinion, but lacks verifiable evidence.")
         else:
-             # Too ambiguous
-             conf_fake = 0.5
-             conf_real = 0.5
-             factors.append("ℹ️ Text is neutral but lacks verifiable citations.")
+             factors.append("ℹ️ Content is neutral but lacks sufficient data or citations to verify.")
     else:
-        total = fake_score + real_score + 0.1
+        total = fake_score + real_score + 0.1 
         conf_fake = fake_score / total
         conf_real = real_score / total
         
-        # Boost the winner
-        if conf_fake > conf_real:
-            conf_fake = min(0.99, conf_fake + 0.15)
+        if conf_fake > CONFIDENCE_THRESHOLD:
+            classification = "Fake"
+            conf_fake = min(0.99, conf_fake + 0.1)
             conf_real = 1 - conf_fake
-        else:
-            conf_real = min(0.99, conf_real + 0.15)
+        elif conf_real > CONFIDENCE_THRESHOLD:
+            classification = "Real"
+            conf_real = min(0.99, conf_real + 0.1)
             conf_fake = 1 - conf_real
-
-    classification = "Fake" if conf_fake > conf_real else "Real"
-    
-    # Ensure factors exist
-    if len(factors) < 2:
-        if classification == "Fake":
-            factors.append("🚩 Lacks citations from authoritative bodies.")
-            factors.append("🚩 Tone analysis suggests subjective persuasion.")
         else:
-            factors.append("✅ Tone appears neutral and objective.")
-            factors.append("✅ Structure resembles journalistic reporting.")
+            classification = "Unverified"
+            if conf_fake > conf_real:
+                conf_fake = 0.55
+                conf_real = 0.45
+            else:
+                conf_fake = 0.45
+                conf_real = 0.55
+            factors.append("⚠️ Ambiguous Evidence: Signals are mixed or too weak for a definitive rating.")
 
-    # 7. Fetch Live News (The New Combination Feature)
+    # 11. Natural Language Explanation
+    explanation = ""
+    if classification == "Fake":
+        reasons = []
+        if any("medical claims" in f for f in factors): reasons.append("makes unverified medical claims")
+        if any("subjectivity" in f for f in factors): reasons.append("uses highly subjective language")
+        if any("sensationalist" in f or "emotionally" in f or "urgency" in f for f in factors): reasons.append("relies on sensationalism")
+        if any("Contradictory" in f for f in factors): reasons.append("references sources contradictorily")
+        if any("AI Deep Analysis" in f for f in factors): reasons.append("deep learning model detected conspiracy patterns")
+        
+        if reasons:
+            explanation = f"Flagged as Misinformation because it {', and '.join(reasons[:2])}."
+        else:
+            explanation = "Flagged as likely misinformation due to a lack of verifiable sources and presence of suspicious patterns."
+            
+    elif classification == "Real":
+        reasons = []
+        if any("reputable entity" in f for f in factors): reasons.append("cites reputable sources with context")
+        if any("Alignment" in f for f in factors): reasons.append("claims are supported by strong evidence")
+        if any("AI Deep Analysis" in f for f in factors): reasons.append("deep learning model validated the reporting style")
+        
+        if reasons:
+            explanation = f"Rated Credible because it {', and '.join(reasons)}."
+        else:
+            explanation = "Rated Credible as it follows standard journalistic structures without sensationalism."
+            
+    else: # Unverified
+        explanation = "Rated Unverified. The content does not contain obvious misinformation triggers, but also lacks the strong citations or authoritative references required for a 'Credible' rating."
+
+    # 12. Fetch Live News
     related_news = search_google_news(text)
 
-    # 8. Static Resources
+    # 13. Static Resources
     verification_tools = []
     if classification == "Real":
         verification_tools = [
@@ -280,8 +399,9 @@ def analyze_content(text: str, source_type: str = "text"):
         "confidenceReal": round(conf_real, 4),
         "confidenceFake": round(conf_fake, 4),
         "factors": factors,
-        "related_news": related_news,      # Live results
-        "verification_tools": verification_tools # Static tools
+        "explanation": explanation,
+        "related_news": related_news,
+        "verification_tools": verification_tools
     }
 
 # --- Endpoints ---
