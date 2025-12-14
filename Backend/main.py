@@ -183,6 +183,10 @@ def home():
     return {"status": "active", "message": "FactCheck AI Backend is running."}
 
 @app.post("/predict_text")
+@app.post("/predict")
+@app.post("/analyze")
+@app.post("/check")
+@app.post("/analyze-text")
 async def predict_text(request: TextRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
