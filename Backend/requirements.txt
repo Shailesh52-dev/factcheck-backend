@@ -8,3 +8,6 @@ python-multipart
 pillow
 requests
 beautifulsoup4
+pydantic
+requests
+textblob

@@ -154,10 +154,17 @@ def analyze_content(text: str, source_type: str = "text"):
         "evidence suggests": "Uses cautious, scientific language."
     }
 
-    # 3. Trusted Source Mentions (New Category)
+    # 3. Trusted Source Mentions (New Category - STRICTER)
+    # Acronyms are only trusted if accompanied by citation context.
     trusted_sources = [
         "who", "cdc", "nasa", "fda", "un", "nato", "reuters", "ap", "afp", "bbc", 
         "cnn", "nytimes", "washington post", "guardian", "isro", "rbi", "sebi", "iit", "aiims"
+    ]
+    
+    # Context words that suggest a verifiable source
+    valid_citation_context = [
+        "report", "study", "journal", "published", "publication", "statement", "released", 
+        "official", "data", "link", "website", "202", "201", "according to", "cited"
     ]
     
     # Check Fake Triggers
@@ -172,11 +179,18 @@ def analyze_content(text: str, source_type: str = "text"):
             real_score += 1
             factors.append(f"✅ {reason}")
 
-    # Check Trusted Sources (Boost Real Score)
+    # Check Trusted Sources (Boost Real Score - Context Aware)
     for source in trusted_sources:
         if f" {source} " in f" {text_lower} " or f"{source}." in text_lower: # basic word boundary check
-            real_score += 2.0
-            factors.append(f"✅ Cites reputable entity ('{source.upper()}').")
+            # Check if any citation context exists in the text
+            has_context = any(ctx in text_lower for ctx in valid_citation_context)
+            
+            if has_context:
+                real_score += 2.0
+                factors.append(f"✅ Cites reputable entity ('{source.upper()}') with verifiable context.")
+            else:
+                # Do NOT boost if no context. Just naming "WHO" isn't enough.
+                pass
 
     # 4. Structural Checks
     if len(text) > 20 and sum(1 for c in text if c.isupper()) / len(text) > 0.6:
@@ -189,13 +203,19 @@ def analyze_content(text: str, source_type: str = "text"):
 
     # 5. Contextual Logic (The "Robustness" Layer)
     # If text makes medical claims ("cure", "doctor", "health") but lacks scientific backing triggers ("study", "journal"), penalize it.
-    medical_keywords = ["cure", "medicine", "health", "doctor", "treatment", "virus", "disease", "diabetes", "cancer"]
+    medical_keywords = ["cure", "medicine", "health", "doctor", "treatment", "virus", "disease", "diabetes", "cancer", "brain", "blood", "human body"]
     has_medical_context = any(word in text_lower for word in medical_keywords)
     has_scientific_backing = any(word in text_lower for word in ["study", "research", "journal", "clinical", "trial", "published", "report"])
     
     if has_medical_context and not has_scientific_backing:
         fake_score += 2.0
         factors.append("🚩 Makes medical claims without citing studies, trials, or reports.")
+
+    # --- Contradiction Detector (NEW FIX) ---
+    # Detects "Secret Study" or "Hidden Report" - Valid research is rarely secret.
+    if "secret" in text_lower and ("study" in text_lower or "report" in text_lower):
+        fake_score += 3.0
+        factors.append("🚩 Contradictory sourcing detected: legitimate scientific studies are rarely 'secret'.")
 
     # 6. Calculate Confidence (Weighted Logic)
     # If no triggers found, heavily rely on sentiment and structure
